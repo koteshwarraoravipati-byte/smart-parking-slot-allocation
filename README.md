@@ -54,3 +54,6 @@ This MVP has no TLS termination, distributed rate limiter, password recovery, to
 ## Academic materials
 See [presentation notes](docs/PRESENTATION.md) for architecture, algorithm, OS concepts, demo flow, viva answers and limitations.
 See [verification record](docs/VERIFICATION.md) for checks actually executed by the builder.
+
+## Optional continuous integration
+The connector could not write workflow files with its current permissions. Copy docs/ci-example.yml to .github/workflows/ci.yml yourself to enable GitHub Actions (PostgreSQL integration tests and frontend build). The template uses isolated CI-only test credentials, not real secrets. CI has not been run or verified by the builder.
