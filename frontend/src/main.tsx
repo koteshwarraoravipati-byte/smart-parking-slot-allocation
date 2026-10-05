@@ -4,7 +4,7 @@ import './style.css';
 type Slot={id:number;label:string;occupied:boolean};
 type Booking={id:number;slot_id:number;vehicle:string;started_at:string;ended_at:string|null;amount_cents:number|null};
 type Dashboard={slots:number;active:number;revenue_cents:number;bookings:Booking[]};
-const API='http://localhost:8000';
+const API=(import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
 function App(){
  const [token,setToken]=useState<string|null>(null),[me,setMe]=useState<{username:string;role:string}|null>(null);
  const [slots,setSlots]=useState<Slot[]>([]),[bookings,setBookings]=useState<Booking[]>([]),[dashboard,setDashboard]=useState<Dashboard|null>(null);
