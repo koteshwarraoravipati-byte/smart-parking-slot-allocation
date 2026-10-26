@@ -1,59 +1,44 @@
-# Smart Parking Slot Allocation
+# Smart Parking Slot Allocation System
 
-An academic full-stack project: React + TypeScript + Vite, FastAPI, PostgreSQL, SQLAlchemy and Alembic. No Supabase account or API keys are needed. This is a local academic MVP, not a deployed payment/production service.
+A responsive academic full-stack parking application demonstrating safe parking-slot allocation, registration/login, bookings and checkout.
+
+## Live application
+- Website: https://smart-parking-slot-allocation.vercel.app/
+- Backend health: https://smart-parking-slot-allocation.onrender.com/health
+- Source repository: https://github.com/koteshwarraoravipati-byte/smart-parking-slot-allocation
+
+Create an account on the website to try the parking map and booking flow. Use synthetic vehicle numbers for the classroom demo. There are 12 seeded slots. The rate is ₹20 per commenced hour; the app does not collect real payments.
 
 ## Features
-- Register/login with salted scrypt password hashes and signed, expiring JWT sessions.
-- Live slot availability, vehicle entry, first-available allocation, booking history and checkout.
-- Minimum one hour, INR 20 per commenced hour (integer paise stored; no real payment).
-- Administrator dashboard with occupancy, booking history and revenue.
-- Observable semaphore/mutex thread laboratory, explicitly separate from database safety.
-- Transactions, row locks, partial unique indexes, replay-safe allocation and atomic, repeatable checkout.
+- Mobile-friendly slot map, availability counts, account registration and sign-in.
+- Automatic available-slot allocation, booking history and checkout.
+- Administrator-only occupancy, booking and revenue dashboard; ordinary users are denied access.
+- A teaching demo of Python semaphore/mutex concepts, separate from real booking protection.
+- PostgreSQL transactions, row locks, uniqueness constraints and idempotent booking/checkout operations.
 
-## Quick start (Docker Desktop)
-1. Install/start Docker Desktop with Linux containers. Docker must report a running server via `docker version`.
-2. Copy `.env.example` to `.env`. Set your own PostgreSQL password and random JWT secret (32+ characters). Do not commit this file.
-   Generate a secret with `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
-   For the PostgreSQL password use URL-safe letters/numbers to avoid escaping the connection URL.
-3. From this repository: `docker compose up --build`.
-4. Visit http://localhost:5173 ; API documentation: http://localhost:8000/docs.
-5. Create an ordinary account in the UI. No default admin account exists.
-6. Create your administrator explicitly: `docker compose exec backend python -m app.admin`. Enter a new username/password privately in the terminal, then sign in through the UI.
+## Technology and services
+- Frontend: React, TypeScript and Vite, deployed on Vercel.
+- Backend: Python, FastAPI, SQLAlchemy and Alembic, deployed on Render.
+- Database: PostgreSQL hosted on Neon.
+- No third-party API keys, payment credentials, map keys, or AI keys are required. The backend does require private deployment configuration: DATABASE_URL and JWT_SECRET. CORS_ORIGINS must allow the website origin. VITE_API_URL is the frontend's backend address and is public configuration, not a secret. Keep credentials out of GitHub.
 
-The initial Alembic migration creates 12 parking slots. Data persists in the Docker volume. `docker compose down` preserves data; `docker compose down -v` **deletes all local data**.
+## Run locally with Docker Compose
+1. Install and start Docker Desktop.
+2. Copy .env.example to .env and set a private PostgreSQL password plus a random JWT secret. Do not commit .env.
+3. From the repository root run: `docker compose up --build`
+4. Open http://localhost:5173. The API docs are at http://localhost:8000/docs.
+5. Create a normal user on the site. No default admin account is created.
+6. To create an administrator for a local demo, run `docker compose exec backend python -m app.admin` and enter credentials privately in the terminal.
 
-## Manual development
-Requires Node 20.19+ or 22+, Python 3.12 and PostgreSQL 16.
-Create an empty database and set `DATABASE_URL=postgresql+psycopg://USER:PASSWORD@localhost:5432/DB` and `JWT_SECRET` in your terminal environment. Windows PowerShell: `$env:NAME="value"`; macOS/Linux: `export NAME="value"`.
+The initial migration creates 12 slots. `docker compose down` keeps the local database volume; `docker compose down -v` deletes local data.
 
-Backend, from `backend/`:
-`python -m venv .venv` then activate it, `python -m pip install -r requirements.txt`, `alembic upgrade head`, `uvicorn app.main:app --reload`.
-
-Frontend, from `frontend/`: `npm ci`, `npm run dev`. It uses http://localhost:8000; this project deliberately targets local operation only. Frontend tokens stay in memory; refresh requires sign-in again.
+## Local tools
+Requires Docker Desktop with Compose for the simplest setup. Manual development uses Python 3.12, Node.js 20.19+ or 22+, and PostgreSQL. Backend dependencies are in backend/requirements.txt; frontend dependencies are in frontend/package-lock.json. No global/external API keys are needed for local development.
 
 ## Tests
-From backend, set a test-only random `JWT_SECRET` and run `python -m pytest tests/test_demo.py tests/test_security.py -q`.
+From backend, run `python -m pytest tests -q`. PostgreSQL integration tests require TEST_DATABASE_URL to point to a separate disposable database; those tests drop/recreate tables. Never use production or personal data. Without TEST_DATABASE_URL, integration tests are skipped, not passed.
 
-Real PostgreSQL integration tests intentionally drop and recreate application tables. **Use a separate disposable database, never your normal parking database.** Set `TEST_DATABASE_URL` to its connection URL and run `python -m pytest tests -q`. Without that variable PostgreSQL tests are marked skipped, not passed. Test coverage includes 12 concurrent users competing for 3 slots, same-user concurrency, idempotency conflict, checkout replay/release, ownership and role denial.
+## Synchronization model
+The educational semaphore/mutex illustration is process-local and exists to explain OS synchronization. It does not protect the deployed application across multiple web requests or backend processes. Real booking protection is provided by PostgreSQL transactions and constraints. Availability is a snapshot; a slot is confirmed only after allocation succeeds.
 
-To run inside Compose against a disposable database:
-`docker compose exec db sh -c 'createdb -U "$POSTGRES_USER" parking_test'`
-Then (substitute your local password; avoid shell history on shared machines):
-`docker compose exec -e TEST_DATABASE_URL=postgresql+psycopg://parking:YOUR_PASSWORD@db:5432/parking_test backend python -m pytest tests -q`
-
-## Correctness and concurrency
-Allocation starts a transaction, locks the requesting user's row, checks prior idempotency requests and active bookings, then selects an available slot with `FOR UPDATE SKIP LOCKED`. It inserts a booking before commit. Separate processes are protected by PostgreSQL, not a Python lock.
-Partial unique indexes prevent two active bookings for one slot or one user. A permanent unique user/request-key index preserves replay semantics even after checkout. A repeated allocation key returns the original booking (including a completed booking); use a new key to park again. A different vehicle with the same key is rejected.
-Checkout locks the booking, verifies ownership, computes the rounded hourly fee once, and writes end time/amount in the same transaction. Clearing the active-index predicate releases the slot atomically. Repeated checkout returns the same stored result.
-`SKIP LOCKED` can briefly report no slot while other transactions hold locks. Clients may retry with the same request key. Constraint conflicts safely roll back. Availability displays are snapshots, never a reservation guarantee.
-
-## Security and scope
-Passwords use Python's scrypt with independent random salts; JWT signature/issuer/expiry are validated and roles are read from the database for each request. Public registration always creates users, never admins. Ownership is enforced server-side. JWT secret is required at startup. Keep environment secrets private and rotate before any future deployment.
-This MVP has no TLS termination, distributed rate limiter, password recovery, token revocation, sensors, plate recognition, payment gateway or production monitoring. Do not expose publicly without adding these controls. Use synthetic vehicle registrations for classroom demos. The public repository contains no credentials.
-
-## Academic materials
-See [presentation notes](docs/PRESENTATION.md) for architecture, algorithm, OS concepts, demo flow, viva answers and limitations.
-See [verification record](docs/VERIFICATION.md) for checks actually executed by the builder.
-
-## Optional continuous integration
-The connector could not write workflow files with its current permissions. Copy docs/ci-example.yml to .github/workflows/ci.yml yourself to enable GitHub Actions (PostgreSQL integration tests and frontend build). The template uses isolated CI-only test credentials, not real secrets. CI has not been run or verified by the builder.
+See [presentation notes](docs/PRESENTATION.md), [deployment details](docs/DEPLOYMENT.md), and [verification record](docs/VERIFICATION.md).
