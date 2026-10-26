@@ -1,14 +1,26 @@
-# Hosting the academic demo
+# Deployment and operations
 
-Deployment is not yet verified. Never treat a frontend-only page as a working parking system. Use synthetic data only.
+## Current deployment
+- Frontend: https://smart-parking-slot-allocation.vercel.app/ (Vercel Hobby project; root directory frontend).
+- Backend: https://smart-parking-slot-allocation.onrender.com/ (Render web service; root directory backend).
+- Database: PostgreSQL on Neon.
+- API health/database check: https://smart-parking-slot-allocation.onrender.com/health
 
-## Backend and database
-Create a PostgreSQL database on your chosen free provider. Keep its connection string private; convert its scheme to postgresql+psycopg:// for SQLAlchemy and retain TLS query parameters.
-Create a Render Docker web service from this repository, root directory backend. Choose the free instance if available; stop rather than accept charges. Set DATABASE_URL privately, JWT_SECRET to a generated 48-byte random value, and CORS_ORIGINS to the exact frontend HTTPS origin. The container runs migrations before serving and uses the hosting PORT. Check /health returns {"status":"ok"}.
-No default administrator exists; create one through a private backend terminal with python -m app.admin. Do not add a public bootstrap endpoint.
+The frontend's production bundle points to the Render API. Vercel builds the Vite app from the frontend directory. The backend Dockerfile runs Alembic migrations before starting Uvicorn on the platform-provided PORT.
 
-## Vercel frontend
-Import this repository with root directory frontend, Vite preset, npm ci install command, npm run build build command and dist output. Set VITE_API_URL to the backend HTTPS origin before building. This is a public API origin, not a secret.
+## Required environment settings
+Configure these only in the hosting providers' private settings; never commit their values:
+- Render: DATABASE_URL (Neon PostgreSQL connection string using the SQLAlchemy psycopg scheme), JWT_SECRET (random, long secret), CORS_ORIGINS (https://smart-parking-slot-allocation.vercel.app).
+- Vercel: VITE_API_URL=https://smart-parking-slot-allocation.onrender.com. This is a public API origin, not a credential.
 
-## Verification
-Verify register/login, availability, allocation, checkout, replay, history and denied admin access. Use a separate disposable PostgreSQL database for integration tests because they drop tables. Free hosting may sleep, expire or impose quotas; this academic demo has no production SLA.
+No Supabase, payment, maps, SMS, analytics, or AI API key is required by the app. Do not add real credentials to this repository. Do not expose a default administrator password. An administrator must be created privately through the backend's admin CLI.
+
+## Verification performed 2026-10-26
+- Vercel website returned HTTP 200 and rendered the login/create-account screen.
+- Render /health returned HTTP 200 with status ok, including the database check.
+- Browser test: created a synthetic account, loaded the slot map, allocated a space, checked out, and saw the checkout-complete message.
+- API smoke test: registration, login, 12-slot availability, allocation, idempotent allocation replay, ordinary-user admin denial (403), checkout, repeated checkout, and booking history all passed.
+- This is an application/API smoke test, not a formal production-readiness audit or a fresh multi-process race test. Refer to the verification record for earlier local test coverage and limitations.
+
+## Limitations
+This is an academic demo, not a production parking service. Hosting plans, free quotas, cold starts, expiry rules, and availability are controlled by the providers and may change. Do not rely on it for payment, actual parking enforcement, personal vehicle data, or an availability SLA. Use synthetic accounts and vehicle registrations. For local use see the root README.
