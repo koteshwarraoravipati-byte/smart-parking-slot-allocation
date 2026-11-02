@@ -43,8 +43,8 @@ def test_manual_checkout_is_locked_idempotent_and_non_destructive(client, monkey
     factory = MagicMock()
     factory.begin.return_value.__enter__.return_value = db
     monkeypatch.setattr(main, "Session", factory)
-    first = client.post("/admin/bookings/42/checkout")
-    second = client.post("/admin/bookings/42/checkout")
+    first = client.post("/admin/bookings/42/checkout", json={"reason":"  Vehicle left the campus  "})
+    second = client.post("/admin/bookings/42/checkout", json={"reason":"Different retry reason must not overwrite original"})
     assert first.status_code == second.status_code == 200
     assert first.json() == second.json()
     assert first.json()["ended_at"] and first.json()["amount_cents"] == 2000
@@ -61,6 +61,7 @@ def test_manual_checkout_is_locked_idempotent_and_non_destructive(client, monkey
     assert audit.after["username"] == "parking_owner"
     assert audit.after["released_at"] == b.ended_at.isoformat()
     assert audit.after["space"] == "P-3"
+    assert audit.after["reason"] == "Vehicle left the campus"
 
 def test_missing_booking_returns_404(client, monkeypatch):
     main.app.dependency_overrides[main.current_user] = lambda: account("admin")
@@ -69,7 +70,7 @@ def test_missing_booking_returns_404(client, monkeypatch):
     factory = MagicMock()
     factory.begin.return_value.__enter__.return_value = db
     monkeypatch.setattr(main, "Session", factory)
-    assert client.post("/admin/bookings/999/checkout").status_code == 404
+    assert client.post("/admin/bookings/999/checkout", json={"reason":"Vehicle departed"}).status_code == 404
 
 def test_dashboard_contains_booking_owner_name(client, monkeypatch):
     main.app.dependency_overrides[main.current_user] = lambda: account("admin")
@@ -89,7 +90,7 @@ def test_dashboard_contains_booking_owner_name(client, monkeypatch):
 
 def test_release_history_is_admin_only_bounded_and_newest_first(client, monkeypatch):
     main.app.dependency_overrides[main.current_user] = lambda: account("admin")
-    entry = SimpleNamespace(id=12, actor_id=8, after={"booking_id":42,"admin_username":"operator","username":"parking_owner","space":"P-3","vehicle":"TEST CAR","released_at":"2026-11-02T10:00:00+00:00","amount_cents":2000})
+    entry = SimpleNamespace(id=12, actor_id=8, after={"booking_id":42,"admin_username":"operator","username":"parking_owner","space":"P-3","vehicle":"TEST CAR","released_at":"2026-11-02T10:00:00+00:00","amount_cents":2000,"reason":"Vehicle departed"})
     db = MagicMock()
     db.scalars.return_value = [entry]
     factory = MagicMock()
@@ -109,3 +110,23 @@ def test_empty_release_history(client, monkeypatch):
     factory.return_value.__enter__.return_value = db
     monkeypatch.setattr(main, "Session", factory)
     assert client.get("/admin/releases").json() == []
+
+
+@pytest.mark.parametrize("body", [{}, {"reason":""}, {"reason":"   \t\n"}, {"reason":"x"*501}, {"reason":None}, {"reason":123}, {"reason":"Valid reason", "extra":"not allowed"}])
+def test_missing_or_invalid_reason_rejected_before_database_write(client, monkeypatch, body):
+    main.app.dependency_overrides[main.current_user] = lambda: account("admin")
+    factory = MagicMock()
+    monkeypatch.setattr(main, "Session", factory)
+    assert client.post("/admin/bookings/42/checkout", json=body).status_code == 422
+    factory.begin.assert_not_called()
+
+def test_missing_body_rejected(client, monkeypatch):
+    main.app.dependency_overrides[main.current_user] = lambda: account("admin")
+    factory = MagicMock()
+    monkeypatch.setattr(main, "Session", factory)
+    assert client.post("/admin/bookings/42/checkout").status_code == 422
+    factory.begin.assert_not_called()
+
+def test_reason_length_boundary():
+    assert main.ManualReleaseInput(reason="x"*500).reason == "x"*500
+    assert main.ManualReleaseInput(reason=" x ").reason == "x"
