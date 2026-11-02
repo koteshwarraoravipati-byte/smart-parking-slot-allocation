@@ -118,7 +118,26 @@ def admin_checkout(booking_id: int, user=Depends(admin)):
         booking = db.scalar(select(Booking).where(Booking.id == booking_id).with_for_update())
         if not booking:
             raise HTTPException(404, "Booking not found")
-        return finish_checkout(booking)
+        was_active = booking.ended_at is None
+        result = finish_checkout(booking)
+        if was_active:
+            owner = db.get(User, booking.user_id)
+            # Reuse the durable slot audit log. The entry and checkout commit together.
+            # Snapshot human-readable details so later slot/user edits do not rewrite history.
+            db.add(SlotAudit(slot_id=booking.slot_id, actor_id=user.id, action="manual_checkout",
+                before={"booking_id": booking.id, "ended_at": None},
+                after={"booking_id": booking.id, "username": owner.username if owner else "Unknown user",
+                    "admin_username": user.username, "vehicle": booking.vehicle,
+                    "space": booking.slot.label, "released_at": booking.ended_at.isoformat(),
+                    "amount_cents": booking.amount_cents}))
+        return result
+
+@app.get("/admin/releases")
+def manual_release_history(user=Depends(admin)):
+    with Session() as db:
+        entries = db.scalars(select(SlotAudit).where(SlotAudit.action == "manual_checkout").order_by(SlotAudit.id.desc()).limit(100))
+        return [{"id": entry.id, "admin_id": entry.actor_id, **entry.after} for entry in entries]
+
 @app.post("/admin/demo")
 def demo(user=Depends(admin)): return run_demo()
 
