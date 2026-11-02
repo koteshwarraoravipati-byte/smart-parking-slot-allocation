@@ -110,8 +110,12 @@ def dashboard(user=Depends(admin)):
         rows = list(db.execute(select(Booking, User.username).join(User, Booking.user_id == User.id).order_by(Booking.id.desc())))
         return {"slots":len(list(db.scalars(select(Slot.id)))), "active":sum(b.ended_at is None for b, _ in rows), "revenue_cents":sum(b.amount_cents or 0 for b, _ in rows), "bookings":[{**serialize(b), "username": username} for b, username in rows]}
 
+class ManualReleaseInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    reason: str = Field(min_length=1, max_length=500)
+
 @app.post("/admin/bookings/{booking_id}/checkout")
-def admin_checkout(booking_id: int, user=Depends(admin)):
+def admin_checkout(booking_id: int, body: ManualReleaseInput, user=Depends(admin)):
     # A manual removal ends the visit; never delete its owner or booking history.
     # Lock and reuse the same idempotent billing operation as owner/ticket checkout.
     with Session.begin() as db:
@@ -129,7 +133,7 @@ def admin_checkout(booking_id: int, user=Depends(admin)):
                 after={"booking_id": booking.id, "username": owner.username if owner else "Unknown user",
                     "admin_username": user.username, "vehicle": booking.vehicle,
                     "space": booking.slot.label, "released_at": booking.ended_at.isoformat(),
-                    "amount_cents": booking.amount_cents}))
+                    "amount_cents": booking.amount_cents, "reason": body.reason}))
         return result
 
 @app.get("/admin/releases")
