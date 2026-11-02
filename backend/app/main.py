@@ -106,8 +106,19 @@ def checkout(booking_id: int, user=Depends(current_user)):
 @app.get("/admin/dashboard")
 def dashboard(user=Depends(admin)):
     with Session() as db:
-        all_b = list(db.scalars(select(Booking).order_by(Booking.id.desc())))
-        return {"slots":len(list(db.scalars(select(Slot.id)))), "active":sum(b.ended_at is None for b in all_b), "revenue_cents":sum(b.amount_cents or 0 for b in all_b), "bookings":[serialize(b) for b in all_b]}
+        # Booking-owner names are exposed only through this administrator-only route.
+        rows = list(db.execute(select(Booking, User.username).join(User, Booking.user_id == User.id).order_by(Booking.id.desc())))
+        return {"slots":len(list(db.scalars(select(Slot.id)))), "active":sum(b.ended_at is None for b, _ in rows), "revenue_cents":sum(b.amount_cents or 0 for b, _ in rows), "bookings":[{**serialize(b), "username": username} for b, username in rows]}
+
+@app.post("/admin/bookings/{booking_id}/checkout")
+def admin_checkout(booking_id: int, user=Depends(admin)):
+    # A manual removal ends the visit; never delete its owner or booking history.
+    # Lock and reuse the same idempotent billing operation as owner/ticket checkout.
+    with Session.begin() as db:
+        booking = db.scalar(select(Booking).where(Booking.id == booking_id).with_for_update())
+        if not booking:
+            raise HTTPException(404, "Booking not found")
+        return finish_checkout(booking)
 @app.post("/admin/demo")
 def demo(user=Depends(admin)): return run_demo()
 
