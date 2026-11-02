@@ -9,13 +9,15 @@
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
+    "qrcode": "^1.5.4",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },
   "devDependencies": {
+    "@types/qrcode": "^1.5.5",
     "@types/react": "18.3.20",
     "@types/react-dom": "18.3.6",
     "typescript": "5.8.3",
-    "vite": "6.3.5"
+    "vite": "6.4.5"
   }
 }
