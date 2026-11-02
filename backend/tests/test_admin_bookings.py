@@ -21,12 +21,12 @@ def account(role):
 def booking():
     return SimpleNamespace(id=42, user_id=7, slot_id=3, slot=SimpleNamespace(label="P-3"), vehicle="TEST CAR", started_at=datetime.now(timezone.utc)-timedelta(minutes=5), ended_at=None, amount_cents=None)
 
-@pytest.mark.parametrize("path", ["/admin/dashboard", "/admin/bookings/42/checkout"])
+@pytest.mark.parametrize("path", ["/admin/dashboard", "/admin/bookings/42/checkout", "/admin/releases"])
 def test_ordinary_user_denied(client, monkeypatch, path):
     main.app.dependency_overrides[main.current_user] = lambda: account("user")
     session = MagicMock()
     monkeypatch.setattr(main, "Session", session)
-    response = client.get(path) if path.endswith("dashboard") else client.post(path)
+    response = client.post(path) if path.endswith("checkout") else client.get(path)
     assert response.status_code == 403
     session.assert_not_called()
     session.begin.assert_not_called()
@@ -39,6 +39,7 @@ def test_manual_checkout_is_locked_idempotent_and_non_destructive(client, monkey
     b = booking()
     db = MagicMock()
     db.scalar.return_value = b
+    db.get.return_value = SimpleNamespace(username="parking_owner")
     factory = MagicMock()
     factory.begin.return_value.__enter__.return_value = db
     monkeypatch.setattr(main, "Session", factory)
@@ -51,6 +52,15 @@ def test_manual_checkout_is_locked_idempotent_and_non_destructive(client, monkey
     assert "FOR UPDATE" in sql
     db.delete.assert_not_called()
     assert b.user_id == 7 and b.slot_id == 3
+    db.add.assert_called_once()
+    audit = db.add.call_args.args[0]
+    assert audit.action == "manual_checkout" and audit.actor_id == 8
+    assert audit.slot_id == 3
+    assert audit.after["booking_id"] == 42
+    assert audit.after["admin_username"] == "operator"
+    assert audit.after["username"] == "parking_owner"
+    assert audit.after["released_at"] == b.ended_at.isoformat()
+    assert audit.after["space"] == "P-3"
 
 def test_missing_booking_returns_404(client, monkeypatch):
     main.app.dependency_overrides[main.current_user] = lambda: account("admin")
@@ -75,3 +85,27 @@ def test_dashboard_contains_booking_owner_name(client, monkeypatch):
     assert data["active"] == 1
     assert data["bookings"][0]["username"] == "parking_owner"
     assert "password_hash" not in data["bookings"][0]
+
+
+def test_release_history_is_admin_only_bounded_and_newest_first(client, monkeypatch):
+    main.app.dependency_overrides[main.current_user] = lambda: account("admin")
+    entry = SimpleNamespace(id=12, actor_id=8, after={"booking_id":42,"admin_username":"operator","username":"parking_owner","space":"P-3","vehicle":"TEST CAR","released_at":"2026-11-02T10:00:00+00:00","amount_cents":2000})
+    db = MagicMock()
+    db.scalars.return_value = [entry]
+    factory = MagicMock()
+    factory.return_value.__enter__.return_value = db
+    monkeypatch.setattr(main, "Session", factory)
+    response = client.get("/admin/releases")
+    assert response.status_code == 200
+    assert response.json() == [{"id":12,"admin_id":8,**entry.after}]
+    sql = str(db.scalars.call_args.args[0].compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds":True}))
+    assert "manual_checkout" in sql and "ORDER BY slot_audit.id DESC" in sql and "LIMIT 100" in sql
+
+def test_empty_release_history(client, monkeypatch):
+    main.app.dependency_overrides[main.current_user] = lambda: account("admin")
+    db = MagicMock()
+    db.scalars.return_value = []
+    factory = MagicMock()
+    factory.return_value.__enter__.return_value = db
+    monkeypatch.setattr(main, "Session", factory)
+    assert client.get("/admin/releases").json() == []
